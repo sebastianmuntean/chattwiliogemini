@@ -24,11 +24,11 @@ const tools = {
           },
           startDate: {
             type: Type.STRING,
-            description: 'Data de inceput a intervalului de cautare, in format AAAA-MM-DD. De exemplu, "2024-05-21".',
+            description: 'Data de inceput a intervalului de cautare, in format AAAA-MM-DD. Daca pacientul spune "azi" sau "maine", calculeaza data corespunzatoare. Daca nu specifica anul, foloseste anul curent. De exemplu, "2024-05-21".',
           },
           endDate: {
             type: Type.STRING,
-            description: 'Data de sfarsit a intervalului de cautare, in format AAAA-MM-DD. De obicei, aceeasi cu data de inceput.',
+            description: 'Data de sfarsit a intervalului de cautare, in format AAAA-MM-DD. De obicei, este aceeasi cu data de inceput.',
           },
         },
         required: ['categoryId', 'startDate', 'endDate'],

@@ -10,6 +10,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { tools } from './services/geminiService.js';
 import { getAvailableCategories, getAvailableAppointments, bookAppointment } from './services/clinicService.js';
 import { mulawToLinear16, linear16ToMulaw } from './utils/audioConverter.js';
+import { upsample8kTo16k, downsample16kTo8k } from './utils/audioResampler.js';
 
 // Debug log to check available environment variables at startup
 console.log('Server starting... Available ENV keys:', Object.keys(process.env));
@@ -123,8 +124,12 @@ wss.on('connection', (ws) => {
                     
                     const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
                     if (audioData) {
-                        const linear16Audio = Buffer.from(audioData, 'base64');
-                        const mulawAudio = linear16ToMulaw(linear16Audio);
+                        // Audio from Gemini is 16-bit Linear PCM at 16kHz
+                        const linear16Audio_16k = Buffer.from(audioData, 'base64');
+                        // Downsample to 8kHz for Twilio
+                        const linear16Audio_8k = downsample16kTo8k(linear16Audio_16k);
+                        // Convert to 8-bit mu-law for Twilio
+                        const mulawAudio = linear16ToMulaw(linear16Audio_8k);
                         const mulawBase64 = mulawAudio.toString('base64');
                         
                         const mediaMessage = {
@@ -150,7 +155,7 @@ wss.on('connection', (ws) => {
       console.log('Gemini session promise resolved.');
       if (isCallActive) {
           console.log('Call is active, sending initial text to Gemini to start conversation.');
-          geminiSession.sendRealtimeInput({ text: 'Incepe conversatia cu un salut.' });
+          geminiSession.sendRealtimeInput({ text: 'Saluta apelantul si intreaba-l cu ce il poti ajuta.' });
       }
   });
   
@@ -168,15 +173,18 @@ wss.on('connection', (ws) => {
             isCallActive = true;
             if (geminiSession) {
                 console.log('Gemini session is ready, sending initial text to start conversation.');
-                geminiSession.sendRealtimeInput({ text: 'Incepe conversatia cu un salut.' });
+                geminiSession.sendRealtimeInput({ text: 'Saluta apelantul si intreaba-l cu ce il poti ajuta.' });
             }
             break;
           case 'media':
-            console.log('Received media packet from Twilio.');
             if (geminiSession) {
+                // Audio from Twilio is 8-bit mu-law at 8kHz
                 const mulawAudio = Buffer.from(msg.media.payload, 'base64');
-                const linear16Audio = mulawToLinear16(mulawAudio);
-                const linear16Base64 = linear16Audio.toString('base64');
+                // Convert to 16-bit Linear PCM at 8kHz
+                const linear16Audio_8k = mulawToLinear16(mulawAudio);
+                // Upsample to 16kHz for Gemini
+                const linear16Audio_16k = upsample8kTo16k(linear16Audio_8k);
+                const linear16Base64 = linear16Audio_16k.toString('base64');
 
                 geminiSession.sendRealtimeInput({
                     media: {
@@ -184,7 +192,6 @@ wss.on('connection', (ws) => {
                         mimeType: 'audio/pcm;rate=16000',
                     }
                 });
-                console.log('Forwarded audio to Gemini.');
             }
             break;
           case 'stop':
