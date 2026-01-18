@@ -12,6 +12,24 @@ import { getAvailableCategories, getAvailableAppointments, bookAppointment } fro
 import { mulawToLinear16, linear16ToMulaw } from './utils/audioConverter.js';
 import { upsample8kTo16k, downsample16kTo8k } from './utils/audioResampler.js';
 
+// --- CRITICAL ERROR HANDLING ---
+// These handlers will catch any unhandled errors and log them, which is essential
+// for debugging crashes on platforms like Railway.
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+  if (reason instanceof Error) {
+    console.error(reason.stack);
+  }
+  process.exit(1); // Exit with an error code to signal a crash
+});
+
+process.on('uncaughtException', (err, origin) => {
+  console.error('CRITICAL: Uncaught Exception at:', origin);
+  console.error(err.stack);
+  process.exit(1); // Exit with an error code to signal a crash
+});
+// -----------------------------
+
 // Debug log to check available environment variables at startup
 console.log('Server starting... Available ENV keys:', Object.keys(process.env));
 
@@ -90,6 +108,8 @@ wss.on('connection', (ws) => {
                 console.log('Gemini session opened.');
             },
             onmessage: async (message) => {
+                // This entire block is wrapped in a try/catch, but a low-level error might still crash the process.
+                // The global handlers at the top of the file are a safety net for that.
                 try {
                     if (message.toolCall) {
                         for (const fc of message.toolCall.functionCalls) {
@@ -124,12 +144,17 @@ wss.on('connection', (ws) => {
                     
                     const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
                     if (audioData) {
+                        console.log(`[AUDIO_PIPE] 1. Received audio from Gemini. Base64 length: ${audioData.length}`);
                         // Audio from Gemini is 16-bit Linear PCM at 16kHz
                         const linear16Audio_16k = Buffer.from(audioData, 'base64');
+                        console.log(`[AUDIO_PIPE] 2. Decoded to 16-bit 16kHz buffer. Length: ${linear16Audio_16k.length} bytes.`);
                         // Downsample to 8kHz for Twilio
                         const linear16Audio_8k = downsample16kTo8k(linear16Audio_16k);
+                        console.log(`[AUDIO_PIPE] 3. Downsampled to 8kHz buffer. Length: ${linear16Audio_8k.length} bytes.`);
                         // Convert to 8-bit mu-law for Twilio
                         const mulawAudio = linear16ToMulaw(linear16Audio_8k);
+                        console.log(`[AUDIO_PIPE] 4. Converted to mu-law buffer. Length: ${mulawAudio.length} bytes.`);
+
                         const mulawBase64 = mulawAudio.toString('base64');
                         
                         const mediaMessage = {
@@ -140,9 +165,11 @@ wss.on('connection', (ws) => {
                             },
                         };
                         ws.send(JSON.stringify(mediaMessage));
+                        console.log(`[AUDIO_PIPE] 5. Sent processed audio chunk to Twilio.`);
                     }
                 } catch (error) {
                     console.error('Error processing message from Gemini:', error);
+                    console.error(error.stack);
                 }
             },
             onerror: (e) => console.error('Gemini error:', e),
@@ -202,6 +229,7 @@ wss.on('connection', (ws) => {
         }
     } catch(error) {
         console.error('Error processing message from Twilio:', error);
+        console.error(error.stack);
     }
   });
 
