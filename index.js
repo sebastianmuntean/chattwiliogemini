@@ -11,6 +11,9 @@ import { tools } from './services/geminiService.js';
 import { getAvailableCategories, getAvailableAppointments, bookAppointment } from './services/clinicService.js';
 import { mulawToLinear16, linear16ToMulaw } from './utils/audioConverter.js';
 
+// Debug log to check available environment variables at startup
+console.log('Server starting... Available ENV keys:', Object.keys(process.env));
+
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 
