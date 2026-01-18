@@ -80,7 +80,7 @@ wss.on('connection', (ws) => {
           Fluxul conversatiei trebuie sa fie urmatorul, pas cu pas:
           1. Intreaba pacientul la ce sectie (categorie) doreste programare. Apoi apeleaza functia 'getAvailableCategories' pentru a vedea optiunile si ID-ul sectiei corecte. Confirma cu pacientul sectia aleasa.
           2. Intreaba pacientul pentru ce data doreste programare. Apoi apeleaza 'getAvailableAppointments' folosind ID-ul sectiei pentru a vedea orele libere in acea zi. Prezinta optiunile pacientului.
-          3. Dupa ce pacientul alege o ora, este OBLIGATORIU sa ii ceri detaliile personale necesare pentru programare: Nume complet, Cod Numeric Personal (CNP) si numar de telefon. Nu poti finaliza programarea fara aceste date.
+          3. Dupa ce pacientul alege o ora, spune-i ca pentru a finaliza programarea ai nevoie de cateva date. Apoi, cere-i pe rand detaliile personale necesare: Nume complet, Cod Numeric Personal (CNP) si numar de telefon.
           4. Dupa ce ai TOATE aceste informatii (ID-ul sectiei, data, ora, nume, CNP, telefon), apeleaza functia 'bookAppointment' pentru a finaliza programarea.
           5. Confirma pacientului ca programarea a fost facuta cu succes, folosind mesajul de succes de la API.
           Nu inventa informatii, foloseste intotdeauna uneltele (tools) care iti sunt oferite.`
