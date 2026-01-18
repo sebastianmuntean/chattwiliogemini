@@ -37,7 +37,7 @@ async function getAvailableCategories() {
             summary: `Am gasit ${data.length} sectii disponibile: ${data.map((cat) => cat.name).join(', ')}`
         };
         
-        return JSON.stringify(formattedResponse, null, 2);
+        return formattedResponse;
     } catch (error) {
         console.error(`❌ Error fetching categories:`, error);
         throw error;
@@ -69,7 +69,7 @@ async function getAvailableAppointments(categoryId, startDate, endDate) {
         const data = await response.json();
         console.log(`✓ Appointments fetched successfully`);
         
-        return JSON.stringify(data, null, 2);
+        return data;
     } catch (error) {
         console.error(`❌ Error fetching appointments:`, error);
         throw error;
@@ -174,8 +174,7 @@ async function bookAppointment(details) {
     }
 
     // 2. Fetch available slots for the given day again to find the full slot object
-    const slotsResponse = await getAvailableAppointments(categoryId, appointmentDate, appointmentDate);
-    const slots = JSON.parse(slotsResponse);
+    const slots = await getAvailableAppointments(categoryId, appointmentDate, appointmentDate);
     
     // Find the specific slot that matches the startTime
     const targetSlot = slots.find(slot => slot.startTime === startTime);
@@ -196,7 +195,7 @@ async function bookAppointment(details) {
     });
 
     const confirmationMessage = `Programare finalizata cu succes pentru ${patientName} in data de ${appointmentDate}, ora ${startTime}.`;
-    return JSON.stringify({ success: true, message: confirmationMessage, details: bookingResult }, null, 2);
+    return { success: true, message: confirmationMessage, details: bookingResult };
 }
 
 export {

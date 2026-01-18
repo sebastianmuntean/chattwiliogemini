@@ -64,6 +64,7 @@ wss.on('connection', (ws) => {
   
   let geminiSession;
   let streamSid;
+  let isCallActive = false;
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const sessionPromise = ai.live.connect({
@@ -74,6 +75,7 @@ wss.on('connection', (ws) => {
           outputAudioTranscription: {},
           tools: [tools],
           systemInstruction: `Esti un receptioner virtual pentru o clinica medicala, prietenos si eficient. Scopul tau este sa ajuti pacientii sa isi faca programari. Fii politicos si clar.
+          Vei incepe conversatia salutand apelantul si intrebandu-l cu ce il poti ajuta.
           Fluxul conversatiei trebuie sa fie urmatorul, pas cu pas:
           1. Intreaba pacientul la ce sectie (categorie) doreste programare. Apoi apeleaza functia 'getAvailableCategories' pentru a vedea optiunile si ID-ul sectiei corecte. Confirma cu pacientul sectia aleasa.
           2. Intreaba pacientul pentru ce data doreste programare. Apoi apeleaza 'getAvailableAppointments' folosind ID-ul sectiei pentru a vedea orele libere in acea zi. Prezinta optiunile pacientului.
@@ -107,12 +109,13 @@ wss.on('connection', (ws) => {
                                 result = { error: e.message };
                             }
                             
-                            console.log(`Sending tool response to Gemini: ${JSON.stringify(result)}`);
+                            const resultString = JSON.stringify(result);
+                            console.log(`Sending tool response to Gemini: ${resultString}`);
                             geminiSession?.sendToolResponse({
                                 functionResponses: {
                                     id: fc.id,
                                     name: fc.name,
-                                    response: { result: JSON.stringify(result) },
+                                    response: { result: resultString },
                                 }
                             });
                         }
@@ -142,7 +145,14 @@ wss.on('connection', (ws) => {
         }
     });
 
-  sessionPromise.then(session => geminiSession = session);
+  sessionPromise.then(session => {
+      geminiSession = session;
+      console.log('Gemini session promise resolved.');
+      if (isCallActive) {
+          console.log('Call is active, sending initial text to Gemini to start conversation.');
+          geminiSession.sendRealtimeInput({ text: 'Incepe conversatia cu un salut.' });
+      }
+  });
   
   ws.on('message', (message) => {
     try {
@@ -155,8 +165,14 @@ wss.on('connection', (ws) => {
           case 'start':
             console.log('Twilio start event received.');
             streamSid = msg.start.streamSid;
+            isCallActive = true;
+            if (geminiSession) {
+                console.log('Gemini session is ready, sending initial text to start conversation.');
+                geminiSession.sendRealtimeInput({ text: 'Incepe conversatia cu un salut.' });
+            }
             break;
           case 'media':
+            console.log('Received media packet from Twilio.');
             if (geminiSession) {
                 const mulawAudio = Buffer.from(msg.media.payload, 'base64');
                 const linear16Audio = mulawToLinear16(mulawAudio);
@@ -168,10 +184,12 @@ wss.on('connection', (ws) => {
                         mimeType: 'audio/pcm;rate=16000',
                     }
                 });
+                console.log('Forwarded audio to Gemini.');
             }
             break;
           case 'stop':
             console.log('Twilio stop event received. Call has ended.');
+            isCallActive = false;
             geminiSession?.close();
             break;
         }
