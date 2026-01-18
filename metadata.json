@@ -1,5 +1,0 @@
-{
-  "name": "Clinic Appointment Voice Bot",
-  "description": "An application simulating a telephone robot for booking clinic appointments. It uses the Gemini Live API for real-time conversational AI and function calling to interact with mock clinic services.",
-  "requestFramePermissions": []
-}

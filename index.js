@@ -20,29 +20,49 @@ const wss = new WebSocketServer({ server });
 
 // Endpoint that Twilio calls when a phone call comes in
 app.post('/voice', (req, res) => {
-  console.log('Received incoming call...');
-  const response = new VoiceResponse();
-  const connect = response.connect();
-  // Ensure PUBLIC_URL does not have protocol for wss URL
-  const publicUrl = process.env.PUBLIC_URL.replace(/^https?:\/\//, '');
-  const streamUrl = `wss://${publicUrl}/media`;
-  
-  console.log(`Connecting to WebSocket stream: ${streamUrl}`);
-  connect.stream({
-    url: streamUrl,
-  });
+  try {
+    console.log('Received incoming call...');
+    // CRITICAL: Check if PUBLIC_URL is set. This is a common cause of crashes.
+    if (!process.env.PUBLIC_URL) {
+        console.error('FATAL: PUBLIC_URL environment variable is not set on the server.');
+        res.status(500).type('text/plain').send('Server configuration error: PUBLIC_URL is not set.');
+        return;
+    }
 
-  res.type('text/xml');
-  res.send(response.toString());
+    const response = new VoiceResponse();
+    const connect = response.connect();
+    // Ensure PUBLIC_URL does not have protocol for wss URL
+    const publicUrl = process.env.PUBLIC_URL.replace(/^https?:\/\//, '');
+    const streamUrl = `wss://${publicUrl}/media`;
+    
+    console.log(`Connecting to WebSocket stream: ${streamUrl}`);
+    connect.stream({
+      url: streamUrl,
+    });
+
+    res.type('text/xml');
+    res.send(response.toString());
+  } catch (error) {
+      console.error('Unhandled error in /voice handler:', error);
+      res.status(500).type('text/plain').send('Internal Server Error');
+  }
 });
 
 // WebSocket connection handler for the audio stream
 wss.on('connection', (ws) => {
   console.log('Media stream connection established.');
   
+  // CRITICAL: Check if API_KEY is set.
+  if (!process.env.API_KEY) {
+      console.error('FATAL: API_KEY is not set. Closing WebSocket connection.');
+      ws.close(1011, 'Server configuration error: API_KEY not set.');
+      return;
+  }
+  
   let geminiSession;
   let streamSid;
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
   const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
@@ -64,50 +84,54 @@ wss.on('connection', (ws) => {
                 console.log('Gemini session opened.');
             },
             onmessage: async (message) => {
-                if (message.toolCall) {
-                    for (const fc of message.toolCall.functionCalls) {
-                        console.log(`Gemini called tool: ${fc.name}(${JSON.stringify(fc.args)})`);
-                        let result;
-                        try {
-                            if (fc.name === 'getAvailableCategories') {
-                                result = await getAvailableCategories();
-                            } else if (fc.name === 'getAvailableAppointments') {
-                                result = await getAvailableAppointments(fc.args.categoryId, fc.args.startDate, fc.args.endDate);
-                            } else if (fc.name === 'bookAppointment') {
-                                result = await bookAppointment(fc.args);
-                            } else {
-                                result = { error: 'Functie necunoscuta' };
+                try {
+                    if (message.toolCall) {
+                        for (const fc of message.toolCall.functionCalls) {
+                            console.log(`Gemini called tool: ${fc.name}(${JSON.stringify(fc.args)})`);
+                            let result;
+                            try {
+                                if (fc.name === 'getAvailableCategories') {
+                                    result = await getAvailableCategories();
+                                } else if (fc.name === 'getAvailableAppointments') {
+                                    result = await getAvailableAppointments(fc.args.categoryId, fc.args.startDate, fc.args.endDate);
+                                } else if (fc.name === 'bookAppointment') {
+                                    result = await bookAppointment(fc.args);
+                                } else {
+                                    result = { error: 'Functie necunoscuta' };
+                                }
+                            } catch (e) {
+                                console.error("Error executing tool:", e);
+                                result = { error: e.message };
                             }
-                        } catch (e) {
-                            console.error("Error executing tool:", e);
-                            result = { error: e.message };
+                            
+                            console.log(`Sending tool response to Gemini: ${JSON.stringify(result)}`);
+                            geminiSession?.sendToolResponse({
+                                functionResponses: {
+                                    id: fc.id,
+                                    name: fc.name,
+                                    response: { result: JSON.stringify(result) },
+                                }
+                            });
                         }
-                        
-                        console.log(`Sending tool response to Gemini: ${JSON.stringify(result)}`);
-                        geminiSession?.sendToolResponse({
-                            functionResponses: {
-                                id: fc.id,
-                                name: fc.name,
-                                response: { result: JSON.stringify(result) },
-                            }
-                        });
                     }
-                }
-                
-                const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-                if (audioData) {
-                    const linear16Audio = Buffer.from(audioData, 'base64');
-                    const mulawAudio = linear16ToMulaw(linear16Audio);
-                    const mulawBase64 = mulawAudio.toString('base64');
                     
-                    const mediaMessage = {
-                        event: 'media',
-                        streamSid: streamSid,
-                        media: {
-                            payload: mulawBase64, 
-                        },
-                    };
-                    ws.send(JSON.stringify(mediaMessage));
+                    const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+                    if (audioData) {
+                        const linear16Audio = Buffer.from(audioData, 'base64');
+                        const mulawAudio = linear16ToMulaw(linear16Audio);
+                        const mulawBase64 = mulawAudio.toString('base64');
+                        
+                        const mediaMessage = {
+                            event: 'media',
+                            streamSid: streamSid,
+                            media: {
+                                payload: mulawBase64, 
+                            },
+                        };
+                        ws.send(JSON.stringify(mediaMessage));
+                    }
+                } catch (error) {
+                    console.error('Error processing message from Gemini:', error);
                 }
             },
             onerror: (e) => console.error('Gemini error:', e),
@@ -118,34 +142,38 @@ wss.on('connection', (ws) => {
   sessionPromise.then(session => geminiSession = session);
   
   ws.on('message', (message) => {
-    const msg = JSON.parse(message);
+    try {
+        const msg = JSON.parse(message);
 
-    switch (msg.event) {
-      case 'connected':
-        console.log('Twilio connected event received.');
-        break;
-      case 'start':
-        console.log('Twilio start event received.');
-        streamSid = msg.start.streamSid;
-        break;
-      case 'media':
-        if (geminiSession) {
-            const mulawAudio = Buffer.from(msg.media.payload, 'base64');
-            const linear16Audio = mulawToLinear16(mulawAudio);
-            const linear16Base64 = linear16Audio.toString('base64');
+        switch (msg.event) {
+          case 'connected':
+            console.log('Twilio connected event received.');
+            break;
+          case 'start':
+            console.log('Twilio start event received.');
+            streamSid = msg.start.streamSid;
+            break;
+          case 'media':
+            if (geminiSession) {
+                const mulawAudio = Buffer.from(msg.media.payload, 'base64');
+                const linear16Audio = mulawToLinear16(mulawAudio);
+                const linear16Base64 = linear16Audio.toString('base64');
 
-            geminiSession.sendRealtimeInput({
-                media: {
-                    data: linear16Base64, 
-                    mimeType: 'audio/pcm;rate=16000',
-                }
-            });
+                geminiSession.sendRealtimeInput({
+                    media: {
+                        data: linear16Base64, 
+                        mimeType: 'audio/pcm;rate=16000',
+                    }
+                });
+            }
+            break;
+          case 'stop':
+            console.log('Twilio stop event received. Call has ended.');
+            geminiSession?.close();
+            break;
         }
-        break;
-      case 'stop':
-        console.log('Twilio stop event received. Call has ended.');
-        geminiSession?.close();
-        break;
+    } catch(error) {
+        console.error('Error processing message from Twilio:', error);
     }
   });
 
